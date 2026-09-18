@@ -1,0 +1,1004 @@
+// ==UserScript==
+// @name         Click Helper [bloxd.io/bloxd/bloxd io]
+// @namespace    https://bloxd.io
+// @icon         https://raw.githubusercontent.com/ClickHelper67i000141/Click-Helper/refs/heads/main/assets/ch.png
+// @version      1.5.3
+// @description  Killaura, (L/R) AutoClicker, ViewModel, Chams.
+// @author       MakeItOrBreakIt
+// @license      MIT
+ 
+// @match        *://*.bloxd.io/*
+// @match        *://*.bloxd.com/*
+// @match        *://*.bloxd.dev/*
+// @match        *://*.bloxdhop.io/*
+// @match        *://*.eviltower.io/*
+// @match        *://*.doodlecube.io/*
+// @match        *://*.playbloxd.com/*
+// @match        *://*.bloxdk12.com/*
+// @match        *://*.bloxdunblocked.*/*
+// @match        *://*.unbloxd.*/*
+// @match        *://*.buildminecreate.com/*
+// @match        *://*.buildhub.*/*
+// @match        *://*.skillhub.vip/*
+// @match        *://*.classcraft.*/*
+// @match        *://*.collabspace.space/*
+// @match        *://*.creativebuilding.*/*
+// @match        *://*.bedwars.space/*
+// @match        *://*.bedwarsonline.net/*
+// @match        *://*.iogamesunblocked.com/*
+// @match        *://*.unblockedgames.club/*
+// @match        *://*.math.wales/*
+// @match        *://*.math.cymru/*
+// @match        *://*.geometry.com.de/*
+// @match        *://*.trigonometry.website/*
+// @match        *://*.geometry.quest/*
+// @match        *://*.geometries.top/*
+// @match        *://*.maths.icu/*
+// @match        *://*.geologies.top/*
+// @match        *://*.archeology.top/*
+ 
+// @grant        none
+// ==/UserScript==
+ 
+(() => {
+  'use strict';
+ 
+  const { defineProperty, keys, values, entries, assign } = Object;
+  const { hypot, atan2, sin, cos, abs, max, min, random, PI } = Math;
+  const __call = (() => {}).call;
+ 
+  const utils = {
+    attempt: (fn, fallback = null) => { try { return fn(); } catch { return fallback; } },
+    _cache: Object.create(null),
+    cache(key, value) {
+      if (value === undefined) return this._cache[key];
+      return (this._cache[key] = value);
+    },
+    clearCache() { this._cache = Object.create(null); }
+  };
+ 
+  const math = {
+    distanceSq(a, b) {
+      const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+      return dx * dx + dy * dy + dz * dz;
+    },
+    clamp: (v, lo, hi) => v < lo ? lo : v > hi ? hi : v,
+    angleDiff: (a, b) => atan2(sin(a - b), cos(a - b))
+  };
+ 
+  const hooks = {
+    noa: null,
+    injected: false,
+ 
+    init() {
+      if (this.injected) return;
+      let captured = false;
+      defineProperty(Function.prototype, 'call', {
+        enumerable: false,
+        configurable: true,
+        writable: true,
+        value: function (thisArg, ...args) {
+          if (!captured) {
+            const c = args[0];
+            if (c && c.entities && c.bloxd) {
+              captured = true;
+              window.noa = c;
+              hooks.noa = c;
+              hooks.injected = true;
+              console.log(
+                "%c[Click Helper]%c Injected successfully!",
+                "background: linear-gradient(90deg, #7c5cfc, #c84cff); color: #fff; font-weight: bold; padding: 3px 8px; border-radius: 4px;",
+                "color: #50FA7B; font-weight: bold; margin-left: 6px;"
+              );
+              defineProperty(Function.prototype, 'call', { value: __call });
+              hooks.onInjected();
+            }
+          }
+          return __call.apply(this, [thisArg, ...args]);
+        }
+      });
+    },
+ 
+    onInjected() {
+      const injectBtn = document.getElementById('ch-inject');
+      if (injectBtn) {
+        injectBtn.style.pointerEvents = 'none';
+        injectBtn.style.opacity = '0.8';
+        injectBtn.innerHTML = '<i class="fa-solid fa-circle-check" style="color:#44ffaa;"></i>';
+      }
+    }
+  };
+ 
+  const noa = {
+    _cachedHeld: null,
+ 
+    connectedInGame() {
+      return !!(hooks.noa?.bloxd?.client?.msgHandler);
+    },
+ 
+    state(id, comp) {
+      return utils.attempt(() => hooks.noa.entities.getState(id, comp));
+    },
+ 
+    getPosition(id = 1) {
+      return this.state(id, 'position')?.position ?? null;
+    },
+ 
+    isAlive(id = 1) {
+      return this.state(id, 'genericLifeformState')?.isAlive ?? true;
+    },
+ 
+    getPlayerIds() {
+      return utils.attempt(() => values(hooks.noa?.bloxd?.getPlayerIds?.() ?? {}), []);
+    },
+	
+    getAlivePlayers() {
+      return this.getPlayerIds().filter(id => id !== 1 && this.isAlive(id));
+    },
+ 
+    getHeldItem(id = 1) {
+    if (!hooks.noa) return null;
+	if (!this._cachedHeld) {
+        const comp = Object.values(hooks.noa.entities.components).find(c => Object.values(c).some(v => v && typeof v == "object" && "fistItem" in v));
+        if (!comp) return null;
+        this._cachedHeld = id => hooks.noa.entities.getState(id, comp.name);
+	}
+    return utils.attempt(() => this._cachedHeld(id));
+	},
+ 
+    doSwing(timestamp = Date.now(), clientSwing = true, serverSwing = true) {
+      utils.attempt(() => {
+        const held = this.getHeldItem();
+        if (!held) return;
+        const item = held?._standardItem;
+        if (clientSwing && typeof item?.trySwingBlock === 'function') item.trySwingBlock(timestamp);
+        if (serverSwing) this.state(1, 'moveState')?.setArmsAreSwinging?.(true);
+      });
+    },
+ 
+    doAttack(id, { knockback = 0.6, pull = false, pullStrength = 1, swing = true } = {}) {
+      utils.attempt(() => {
+        const fistItem = this.getHeldItem()?.fistItem;
+        if (!fistItem) return;
+ 
+        const proto = Object.getPrototypeOf(fistItem);
+        const attackFn = Object.getOwnPropertyNames(proto)
+          .map(k => fistItem[k])
+          .find(f => typeof f === 'function' && f.length === 3 && f.toString().includes('canAttack'));
+        if (typeof attackFn !== 'function') return;
+ 
+        const targetPos = this.getPosition(id);
+        const selfPos = this.getPosition();
+        if (!targetPos || !selfPos) return;
+ 
+        const dx = targetPos[0] - selfPos[0];
+        const dy = targetPos[1] - selfPos[1] + 1;
+        const dz = targetPos[2] - selfPos[2];
+        const dist = hypot(dx, dy, dz) || 1;
+        const force = knockback * pullStrength * (pull ? -1 : 1);
+ 
+        const dir = [dx / dist * force, dy / dist * force, dz / dist * force];
+        attackFn.call(fistItem, dir, String(id), 'BodyMesh');
+        if (swing) this.doSwing();
+      });
+    },
+ 
+    fireInput(action, down) {
+      utils.attempt(() => {
+        const inp = hooks.noa?.inputs;
+        if (!inp) return;
+        const bucket = down ? inp.down : inp.up;
+        if (typeof bucket.emit === 'function') {
+          bucket.emit(action, {
+            timeStamp: performance.now(),
+            preventDefault: () => {},
+            stopPropagation: () => {}
+          });
+        }
+      });
+    },
+	
+    doInput(action) {
+      this.fireInput(action, true);
+      setTimeout(() => this.fireInput(action, false), 20);
+    },
+ 
+    setChams(enabled) {
+      utils.attempt(() => {
+        if (!hooks.noa) return;
+        const renderer = values(hooks.noa)[12];
+        const thinMeshes = values(renderer ?? {}).find(v => v?.thinMeshes)?.thinMeshes;
+        if (!Array.isArray(thinMeshes)) return;
+        for (const entry of thinMeshes) {
+          const mesh = entry?.meshVariations?.__DEFAULT__?.mesh;
+          if (mesh && typeof mesh.renderingGroupId === 'number') mesh.renderingGroupId = enabled ? 2 : 0;
+        }
+      });
+    },
+  };
+  // globalThis._noa = noa;
+ 
+  class Module {
+    constructor(name, category, def = {}) {
+      this.name = name;
+      this.category = category;
+      this.settings = def.settings ?? {};
+      this.bind = def.bind ?? null;
+      this.hasBody = def.hasBody ?? (keys(this.settings).length > 0);
+      this.enabled = false;
+      this.timer = null;
+ 
+      this._onEnable = def.onEnable ?? null;
+      this._onDisable = def.onDisable ?? null;
+      this._onRender = def.onRender ?? null;
+ 
+      for (const [key, schema] of entries(this.settings)) this[key] = schema.default;
+ 
+      client.modules[name] = this;
+    }
+ 
+    toggle(force) {
+      const next = force ?? !this.enabled;
+      if (next === this.enabled) return this.enabled;
+      this.enabled = next;
+      if (next) this._onEnable?.call(this);
+      else this._onDisable?.call(this);
+      return this.enabled;
+    }
+ 
+    render(ts, dt) {
+      if (this.enabled) this._onRender?.call(this, ts, dt);
+    }
+ 
+    id() { return slug(this.name); }
+  }
+ 
+  const slug = name => name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+ 
+  const client = {
+    modules: {},
+    binds: { menu: 'ShiftRight' }
+  };
+ 
+  const Storage = {
+    KEY: 'clickHelper-cfg',
+ 
+    load() {
+      const saved = utils.attempt(() => JSON.parse(localStorage.getItem(this.KEY)), null) ?? {};
+      if (saved.binds) assign(client.binds, saved.binds);
+      const modState = saved.modules ?? {};
+      for (const mod of values(client.modules)) {
+        const s = modState[mod.name];
+        if (!s) continue;
+        if (typeof s.enabled === 'boolean') mod.enabled = s.enabled;
+        if (s.settings) for (const [k, v] of entries(s.settings)) if (k in mod.settings) mod[k] = v;
+      }
+    },
+ 
+    save() {
+      const modules = {};
+      for (const mod of values(client.modules)) {
+        const settings = {};
+        for (const key of keys(mod.settings)) settings[key] = mod[key];
+        modules[mod.name] = { enabled: mod.enabled, settings };
+      }
+      localStorage.setItem(this.KEY, JSON.stringify({ binds: client.binds, modules }));
+    },
+ 
+    debounced: (() => {
+      let t;
+      return () => { clearTimeout(t); t = setTimeout(() => Storage.save(), 300); };
+    })()
+  };
+ 
+  client.modules["Kill Aura"] = new Module("Kill Aura", "Combat", {
+    settings: {
+      "Delay": { type: "slider", min: 0, max: 1000, step: 5, default: 50 },
+      "Range": { type: "slider", min: 1, max: 20, step: 0.1, default: 6.8 },
+	  "KB Strength": { type: "slider", min: 0, max: 5, step: 0.1, default: 0.6 },
+      "Pull Mode": { type: "boolean", default: false },
+      "Pull Strength": { type: "slider", min: 0.1, max: 2, step: 0.1, default: 1 },
+      "Swing": { type: "boolean", default: true }
+    },
+    onEnable() { this._last = 0; },
+    onRender() {
+      const now = Date.now();
+      if (now - this._last < this.Delay) return;
+      const selfPos = noa.getPosition();
+      if (!selfPos) return;
+      this._last = now;
+      const rangeSq = this.Range * this.Range;
+      for (const id of noa.getAlivePlayers()) {
+        const pos = noa.getPosition(id);
+        if (pos && math.distanceSq(pos, selfPos) <= rangeSq) {
+          noa.doAttack(id, {
+            knockback: this["KB Strength"],
+            pull: this["Pull Mode"],
+            pullStrength: this["Pull Strength"],
+            swing: this["Swing"]
+          });
+        }
+      }
+    }
+  });
+ 
+  client.modules["Aimbot"] = new Module("Aimbot", "Combat", {
+    settings: {
+      "Range": { type: "slider", min: 5, max: 100, step: 1, default: 20 },
+      "Smooth": { type: "slider", min: 0.01, max: 1, step: 0.01, default: 0.8 },
+      "Delay": { type: "slider", min: 0, max: 500, step: 5, default: 5 },
+      "FOV": { type: "slider", min: 1, max: 180, step: 1, default: 150 }
+    },
+    onEnable() { this._last = 0; },
+    onRender() {
+      const now = Date.now();
+      if (now - this._last < this.Delay) return;
+      const selfPos = noa.getPosition();
+      const cam = hooks.noa?.camera;
+      if (!selfPos || !cam) return;
+ 
+      const fovRad = this.FOV * (PI / 180);
+      let best = null, bestDistSq = this.Range * this.Range;
+ 
+      for (const id of noa.getAlivePlayers()) {
+        const pos = noa.getPosition(id);
+        if (!pos) continue;
+        const distSq = math.distanceSq(pos, selfPos);
+        if (distSq >= bestDistSq) continue;
+        const yaw = atan2(pos[0] - selfPos[0], pos[2] - selfPos[2]);
+        if (abs(math.angleDiff(yaw, cam.heading)) <= fovRad / 2) { bestDistSq = distSq; best = pos; }
+      }
+      if (!best) return;
+ 
+      const dx = best[0] - selfPos[0], dz = best[2] - selfPos[2];
+      const dy = best[1] - selfPos[1];
+      const yaw = atan2(dx, dz);
+      const pitch = -atan2(dy, hypot(dx, dz));
+ 
+      cam.heading += math.angleDiff(yaw, cam.heading) * this.Smooth;
+      cam.pitch += (math.clamp(pitch, -1.57, 1.57) - cam.pitch) * this.Smooth;
+      this._last = now;
+    }
+  });
+ 
+  const makeClicker = (name, action) => new Module(name, "Combat", {
+    settings: {
+      "Min CPS": { type: "slider", min: 1, max: 200, step: 1, default: 17 },
+      "Max CPS": { type: "slider", min: 1, max: 200, step: 1, default: 20 }
+    },
+    onEnable() {
+      const tick = () => {
+        if (!this.enabled) return;
+        noa.doInput(action);
+ 
+        const cpsMax = max(1, this["Max CPS"]);
+        const cpsMin = min(cpsMax, this["Min CPS"]);
+ 
+        const delay = 1000 / (cpsMin + random() * (cpsMax - cpsMin));
+        this.timer = setTimeout(tick, max(5, delay));
+      };
+      tick();
+    },
+    onDisable() { clearTimeout(this.timer); }
+  });
+  makeClicker("Left Clicker", "primary-fire");
+  makeClicker("Right Clicker", "alt-fire");
+ 
+  client.modules["BHOP"] = new Module("BHOP", "Movement", {
+    settings: {
+      Chance: { type: "slider", min: 1, max: 100, step: 1, default: 100 }
+    },
+  
+    onRender() {
+      const state = hooks.noa?.inputs?.state;
+      const movement = noa.state(1, "movement");
+  
+      if (!state || !movement) return;
+  
+      const moving = state.forward || state.backward || state.left || state.right;
+      const onGround = utils.attempt(() => movement.isOnGround());
+  
+      noa.fireInput(
+        "jump",
+        !!(onGround && moving && Math.random() * 100 <= this.Chance)
+      );
+    }
+  });
+ 
+  client.modules["Chams"] = new Module("Chams", "Visuals", {
+    onEnable() { noa.setChams(true); },
+    onDisable() { noa.setChams(false); }
+  });
+ 
+  client.modules["ViewModel"] = new Module("ViewModel", "Visuals", {
+    settings: {
+      "Pos X": { type: "slider", min: -3, max: 3, step: 0.05, default: 0, group: "Position" },
+      "Pos Y": { type: "slider", min: -3, max: 3, step: 0.05, default: 0, group: "Position" },
+      "Pos Z": { type: "slider", min: -3, max: 3, step: 0.05, default: 0, group: "Position" },
+      "Rot X": { type: "slider", min: -3.14, max: 3.14, step: 0.01, default: 0, group: "Rotation" },
+      "Rot Y": { type: "slider", min: -3.14, max: 3.14, step: 0.01, default: 0, group: "Rotation" },
+      "Rot Z": { type: "slider", min: -3.14, max: 3.14, step: 0.01, default: 0, group: "Rotation" },
+	  "Spin Tool": { type: "boolean", group: "Spin" },
+      "Spin X": { type: "slider", min: -10, max: 10, step: 0.1, default: 0, group: "Spin" },
+      "Spin Y": { type: "slider", min: -10, max: 10, step: 0.1, default: 2, group: "Spin" },
+      "Spin Z": { type: "slider", min: -10, max: 10, step: 0.1, default: 0, group: "Spin" }
+    },
+    onEnable() {
+      this._lastTs = 0;
+      this._angle = { x: 0, y: 0, z: 0 };
+    },
+    onRender(ts) {
+      const item = noa.getHeldItem()?._standardItem;
+      if (!item) return;
+      const dt = this._lastTs ? (ts - this._lastTs) / 1000 : 0;
+      this._lastTs = ts;
+ 
+      const isTool = item?.typeObj?.constructor?.name === "Tool";
+      if (isTool && this["Spin Tool"]) {
+        this._angle.x += this["Spin X"] * dt;
+        this._angle.y += this["Spin Y"] * dt;
+        this._angle.z += this["Spin Z"] * dt;
+      }
+ 
+      if (item.firstPersonPosOffset) {
+        item.firstPersonPosOffset.x = this["Pos X"];
+        item.firstPersonPosOffset.y = this["Pos Y"];
+        item.firstPersonPosOffset.z = this["Pos Z"];
+      }
+      if (item.firstPersonRotation && isTool) {
+        item.firstPersonRotation.x = this["Rot X"] + this._angle.x;
+        item.firstPersonRotation.y = this["Rot Y"] + this._angle.y;
+        item.firstPersonRotation.z = this["Rot Z"] + this._angle.z;
+      }
+    }
+  });
+ 
+  const AccountModule = {
+    clearAndReload() {
+      document.cookie.split(';').forEach(c => {
+        const n = c.split('=')[0].trim();
+        [`path=/`, `path=/;domain=${location.hostname}`, `path=/;domain=.${location.hostname}`]
+          .forEach(p => document.cookie = `${n}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;${p}`);
+      });
+      if (window.indexedDB?.databases) {
+        window.indexedDB.databases().then(dbs => dbs.forEach(db => db.name && indexedDB.deleteDatabase(db.name))).catch(() => {});
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+      location.reload();
+    }
+  };
+ 
+  Storage.load();
+ 
+  const UIUtil = {
+    bindDisplay(code) {
+      if (!code) return '—';
+      const map = {
+        Key: '', Digit: '', ShiftRight: 'RS', ShiftLeft: 'LS', ControlLeft: 'LC', ControlRight: 'RC',
+        AltLeft: 'LA', AltRight: 'RA', Backquote: '`', Backslash: '\\', BracketLeft: '[', BracketRight: ']',
+        Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', Minus: '-', Equal: '=',
+        Space: 'SPC', Tab: 'TAB', CapsLock: 'CAPS', Enter: 'ENT', Escape: 'ESC', Arrow: ''
+      };
+      let out = code;
+      for (const [k, v] of entries(map)) out = out.replace(k, v);
+      return out;
+    },
+ 
+    safeAppend(el) {
+      if (document.body) return document.body.appendChild(el);
+      const observer = new MutationObserver(() => {
+        if (document.body) { observer.disconnect(); document.body.appendChild(el); }
+      });
+      observer.observe(document.documentElement, { childList: true });
+    },
+ 
+    createStylesheet() {
+      const css = document.createElement('style');
+      css.textContent = `
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@100;200;300;400;500;600;700;800;900&display=swap');
+        @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css');
+        #ch-root, #ch-root * { box-sizing: border-box; }
+        :root {
+          --ch-bg: rgba(16, 16, 22, 0.96);
+          --ch-panel: rgba(26, 26, 36, 0.88);
+          --ch-panel-hover: rgba(32, 30, 44, 0.92);
+          --ch-panel-border: rgba(255,255,255,0.07);
+          --ch-accent-1: #7356DF;
+          --ch-accent-2: #9D85F5;
+          --ch-text: #ece9f4;
+          --ch-text-dim: #8d87a0;
+          --ch-on: #9D85F5;
+          --ch-off: rgba(58,54,76,0.7);
+          --ch-danger: #ff4d6d;
+          --ch-success: #4ce6a8;
+        }
+        #ch-root { position: fixed; top: 20px; left: 20px; width: 300px; background: var(--ch-bg); border: 1px solid var(--ch-panel-border); border-radius: 10px; font-family: 'Montserrat', sans-serif; font-size: 11px; color: var(--ch-text); z-index: 99999; box-shadow: 0 16px 40px rgba(0,0,0,0.6), 0 0 1px rgba(115,86,223,0.4); user-select: none; transition: opacity 0.3s ease, transform 0.3s ease; backdrop-filter: blur(16px) saturate(1.2); transform-origin: center center; }
+        #ch-root.hidden { opacity: 0; pointer-events: none; transform: scale(0.92); }
+        #ch-root.mini #ch-body, #ch-root.mini #ch-tabs { display: none; }
+        #ch-hdr { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: linear-gradient(100deg, #6a4df0, #8f57ea, #a452dd, #6a4df0); background-size: 280% 100%; animation: chGradient 9s linear infinite; cursor: grab; border-radius: 9px 9px 0 0; }
+        @keyframes chGradient { to { background-position: 280% 50%; } }
+        #ch-title { font-weight: 700; font-size: 14px; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.3); letter-spacing: 0.5px; }
+        #ch-title span { opacity: 0.7; font-weight: 500; font-size: 10px; margin-left: 6px; }
+        .ch-hbtn { background: rgba(255,255,255,0.2); border: none; color: #fff; font-size: 12px; cursor: pointer; padding: 2px 8px; border-radius: 4px; transition: 0.2s; display: flex; align-items: center; justify-content: center; width: 28px; height: 24px; }
+        .ch-hbtn:hover { background: rgba(255,255,255,0.4); }
+        .ch-hbtn i { font-size: 13px; }
+ 
+        #ch-tabs { display: flex; background: rgba(0,0,0,0.25); border-bottom: 1px solid var(--ch-panel-border); padding: 0; margin: 0; gap: 0; }
+        .ch-tab { flex: 1; padding: 10px 0 9px 0; text-align: center; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; color: var(--ch-text-dim); cursor: pointer; transition: color 0.2s, background 0.2s, box-shadow 0.2s; position: relative; border: none; background: transparent; outline: none; font-family: 'Montserrat', sans-serif; }
+        .ch-tab:hover { color: var(--ch-text); background: rgba(115,86,223,0.07); }
+        .ch-tab.active { color: #fff; }
+        .ch-tab.active::after { content: ''; position: absolute; bottom: 0; left: 15%; right: 15%; height: 2.5px; background: linear-gradient(90deg, var(--ch-accent-1), var(--ch-accent-2)); border-radius: 2px 2px 0 0; box-shadow: 0 0 8px rgba(115,86,223,0.5); }
+        .ch-tab i { margin-right: 5px; font-size: 12px; }
+ 
+        .ch-tab-panel { display: none; flex-direction: column; gap: 8px; }
+        .ch-tab-panel.active { display: flex; }
+ 
+        #ch-body { padding: 10px; display: flex; flex-direction: column; gap: 7px; max-height: calc(100vh - 120px); overflow-y: auto; }
+        #ch-body::-webkit-scrollbar { width: 4px; }
+        #ch-body::-webkit-scrollbar-thumb { background: var(--ch-accent-1); border-radius: 4px; }
+ 
+        .ch-sec { display: flex; flex-direction: column; background: var(--ch-panel); border-radius: 8px; border: 1px solid var(--ch-panel-border); overflow: hidden; transition: background 0.2s, border-color 0.2s; }
+        .ch-sec:hover { border-color: rgba(115,86,223,0.18); }
+        .ch-sec-hdr { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; cursor: pointer; transition: background 0.2s; }
+        .ch-sec-hdr:hover { background: rgba(115,86,223,0.06); }
+        .ch-lbl { font-size: 10px; font-weight: 700; color: var(--ch-text-dim); text-transform: uppercase; letter-spacing: 0.9px; transition: color 0.2s; }
+        .ch-sec.expanded .ch-lbl { color: var(--ch-text); }
+        .ch-sec-arrow { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; color: var(--ch-text-dim); transition: transform 0.25s cubic-bezier(.4,0,.2,1), color 0.2s; flex-shrink: 0; }
+        .ch-sec.expanded .ch-sec-arrow { transform: rotate(180deg); color: var(--ch-accent-1); }
+        .ch-sec-arrow i { font-size: 10px; }
+        .ch-sec-body { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 0.28s cubic-bezier(.4,0,.2,1), opacity 0.22s ease, padding 0.28s cubic-bezier(.4,0,.2,1); padding: 0 11px; }
+        .ch-sec-body > div { overflow: hidden; min-height: 0; }
+        .ch-sec.expanded .ch-sec-body { grid-template-rows: 1fr; opacity: 1; padding: 2px 11px 11px; }
+        .ch-sec-toprow { padding: 9px 11px; border-top: 1px solid rgba(255,255,255,0.04); }
+        .ch-sec-hdr + .ch-sec-toprow { border-top: 1px solid rgba(255,255,255,0.04); }
+ 
+        .mod-row { display: flex; align-items: center; justify-content: space-between; padding: 2px 0; }
+        .mod-left { display: flex; align-items: center; gap: 9px; flex: 1; }
+        .mod-name { font-size: 12px; font-weight: 600; color: var(--ch-text); }
+        .tg { width: 34px; height: 18px; background: var(--ch-off); border-radius: 9px; position: relative; cursor: pointer; transition: background 0.25s ease; flex-shrink: 0; }
+.tg::after { content: ''; width: 14px; height: 14px; background: #8e8a9c; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: left 0.25s cubic-bezier(.4,0,.2,1), background 0.25s ease; }
+        .tg:hover::after { background: #aaa6ba; }
+        .tg.on { background: linear-gradient(90deg, var(--ch-accent-1), var(--ch-accent-2)); box-shadow: 0 0 10px rgba(115,86,223,0.45); }
+        .tg.on::after { left: 18px; background: #fff; }
+        .tg.on:hover::after { background: #fff; }
+ 
+        .kb { background: rgba(0,0,0,0.28); border: 1px solid rgba(255,255,255,0.09); color: var(--ch-text-dim); font-size: 9px; font-weight: 700; padding: 3px 7px; border-radius: 5px; cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s; display: flex; align-items: center; gap: 5px; font-family: 'Montserrat', monospace; letter-spacing: 0.3px; min-width: 30px; justify-content: center; }
+        .kb:hover { background: rgba(115,86,223,0.14); border-color: rgba(115,86,223,0.5); color: var(--ch-text); box-shadow: 0 0 8px rgba(115,86,223,0.15); }
+        .kb.listening { border-color: var(--ch-accent-2); color: #fff; background: rgba(157,133,245,0.18); animation: kbpulse 0.9s ease infinite; box-shadow: 0 0 10px rgba(157,133,245,0.3); }
+        @keyframes kbpulse { 0%,100%{opacity:1;} 50%{opacity:0.55;} }
+        .kb-x { font-size: 9px; color: rgba(255,120,140,0.55); cursor: pointer; transition: color 0.2s, transform 0.15s; line-height: 1; }
+        .kb-x:hover { color: var(--ch-danger); transform: scale(1.15); }
+ 
+        .sl-row { display: flex; align-items: center; gap: 9px; margin-top: 7px; width: 100%; }
+        .sl-label { font-size: 10px; color: var(--ch-text-dim); font-weight: 600; width: 42px; flex-shrink: 0; transition: color 0.2s; }
+        .sl-row:hover .sl-label { color: var(--ch-text); }
+        input[type=range] { flex: 1; -webkit-appearance: none; background: transparent; cursor: pointer; }
+        input[type=range]::-webkit-slider-runnable-track { height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; transition: background 0.2s; }
+        input[type=range]:hover::-webkit-slider-runnable-track { background: rgba(115,86,223,0.22); }
+        input[type=range]::-webkit-slider-thumb { height: 13px; width: 13px; border-radius: 50%; background: #fff; cursor: pointer; -webkit-appearance: none; margin-top: -4.5px; box-shadow: 0 0 0 0 rgba(115,86,223,0); border: 2px solid #fff; transition: box-shadow 0.2s ease, transform 0.15s ease, background 0.2s ease, border-color 0.2s ease; }
+        input[type=range]:hover::-webkit-slider-thumb { background: var(--ch-accent-1); border-color: var(--ch-accent-1); box-shadow: 0 0 0 6px rgba(115,86,223,0.18), 0 0 12px rgba(115,86,223,0.5); transform: scale(1.15); }
+        input[type=range]:active::-webkit-slider-thumb { background: var(--ch-accent-2); border-color: var(--ch-accent-2); box-shadow: 0 0 0 7px rgba(157,133,245,0.22), 0 0 14px rgba(157,133,245,0.6); transform: scale(1.25); }
+        .sl-val-inp { width: 44px; flex-shrink: 0; background: rgba(0,0,0,0.3) !important; border: 1px solid rgba(255,255,255,0.1) !important; color: var(--ch-accent-1) !important; font-family: 'Montserrat', sans-serif !important; font-size: 11px !important; font-weight: 600 !important; text-align: center !important; border-radius: 5px !important; outline: none !important; padding: 4px 0 !important; height: 22px !important; line-height: 14px !important; box-sizing: border-box !important; transition: border-color 0.2s, box-shadow 0.2s !important; }
+        .sl-val-inp:hover { border-color: rgba(115,86,223,0.4) !important; }
+        .sl-val-inp:focus { border-color: var(--ch-accent-1) !important; box-shadow: 0 0 8px rgba(115,86,223,0.25) !important; }
+        .ch-group-lbl { font-size: 8px; font-weight: 700; color: var(--ch-text-dim); margin-top: 10px; text-transform: uppercase; letter-spacing: 0.6px; }
+        .ch-group-lbl:first-child { margin-top: 2px; }
+        .ch-divider { border-top: 1px solid rgba(255,255,255,0.05); margin: 10px 0 8px 0; }
+        #ch-status { padding: 8px 16px; background: rgba(0,0,0,0.3); border-top: 1px solid var(--ch-panel-border); font-size: 9px; color: var(--ch-text-dim); display: flex; justify-content: space-between; align-items: center; border-radius: 0 0 9px 9px; font-weight: 600; letter-spacing: 0.5px; }
+        #ch-status .dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        #ch-status .dot.green { background: var(--ch-success); box-shadow: 0 0 8px rgba(76,230,168,0.5); }
+        #ch-status .dot.red { background: var(--ch-danger); box-shadow: 0 0 8px rgba(255,77,109,0.5); }
+        #ch-gen { background: rgba(255,77,109,0.3) !important; color: #ff8fa3 !important; }
+        #ch-gen:hover { background: rgba(255,77,109,0.5) !important; }
+        #ch-root input[type="text"], #ch-root input[type="number"], #ch-root textarea {
+          background: rgba(0,0,0,0.3) !important; border: 1px solid rgba(255,255,255,0.08) !important; border-radius: 5px !important;
+          color: var(--ch-text) !important; font-family: 'Montserrat', monospace !important; font-size: 11px !important;
+          padding: 4px 6px !important; outline: none !important; transition: 0.2s !important; box-shadow: none !important;
+        }
+        #ch-root input[type="text"]:focus, #ch-root input[type="number"]:focus, #ch-root textarea:focus {
+          border-color: var(--ch-accent-1) !important; box-shadow: 0 0 8px rgba(115,86,223,0.25) !important;
+        }
+        #ch-root input::placeholder, #ch-root textarea::placeholder { color: var(--ch-text-dim) !important; opacity: 0.6 !important; }
+      `;
+      return css;
+    }
+  };
+ 
+  const UIBuilder = {
+    mkToggle(mod) {
+      const bindKey = mod.name;
+      const code = client.binds[bindKey];
+      const hasKey = !!code;
+      return `
+        <div class="mod-row" id="row-${mod.id()}" data-mod="${mod.name}">
+          <div class="mod-left">
+            <div class="tg${mod.enabled ? ' on' : ''}" id="tg-${mod.id()}"></div>
+            <span class="mod-name">${mod.name}</span>
+          </div>
+          <div class="mod-right">
+            <div class="kb" id="bind-${mod.id()}" data-action="${bindKey}">
+              <i class="fa-solid fa-keyboard" style="font-size:8px;opacity:0.6;"></i>
+              <span class="kb-text">${hasKey ? UIUtil.bindDisplay(code) : '—'}</span>
+              <span class="kb-x" data-unbind="${bindKey}" style="${hasKey ? '' : 'display:none'}">✕</span>
+            </div>
+          </div>
+        </div>`;
+    },
+ 
+    mkBoolean(mod, key, schema) {
+      const val = mod[key];
+      return `
+        <div class="mod-row" onclick="event.stopPropagation()" style="margin-top: 7px; padding: 0;" data-boolean="${mod.name}::${key}">
+          <span class="sl-label" style="width: auto; flex: 1;">${key}</span>
+          <div class="tg${val ? ' on' : ''}" id="bool-${mod.id()}-${slug(key)}"></div>
+        </div>`;
+    },
+ 
+    mkSlider(mod, key, schema) {
+      const val = mod[key];
+      return `<div class="sl-row" data-slider="${mod.name}::${key}">
+        <span class="sl-label">${key}</span>
+        <input type="range" id="sl-${mod.id()}-${slug(key)}" min="${schema.min}" max="${schema.max}" step="${schema.step}" value="${val}">
+        <input type="text" class="sl-val-inp" id="sl-${mod.id()}-${slug(key)}-v" value="${val}">
+      </div>`;
+    },
+ 
+    mkSettingsBody(mod) {
+      let html = '';
+      let lastGroup = null;
+      for (const [key, schema] of entries(mod.settings)) {
+        if (schema.group && schema.group !== lastGroup) {
+          html += lastGroup ? `<div class="ch-divider"></div>` : '';
+          html += `<div class="ch-group-lbl">${schema.group}</div>`;
+        } else if (!schema.group && lastGroup) {
+          html += `<div class="ch-divider"></div>`;
+        }
+        lastGroup = schema.group ?? null;
+        
+        if (schema.type === "boolean") {
+          html += this.mkBoolean(mod, key, schema);
+        } else {
+          html += this.mkSlider(mod, key, schema);
+        }
+      }
+      return html;
+    },
+ 
+    mkModuleSection(mod, expanded = false) {
+      const body = mod.hasBody ? this.mkSettingsBody(mod) : '';
+      const hasBody = !!body;
+      return `
+        <div class="ch-sec${expanded && hasBody ? ' expanded' : ''}" id="sec-${mod.id()}">
+          <div class="ch-sec-hdr" ${hasBody ? `data-sec-toggle="${mod.id()}"` : 'style="cursor:default;"'}>
+            <span class="ch-lbl">${mod.name}</span>
+            ${hasBody ? `<div class="ch-sec-arrow"><i class="fa-solid fa-chevron-down"></i></div>` : ''}
+          </div>
+          <div class="ch-sec-toprow">${this.mkToggle(mod)}</div>
+          ${hasBody ? `<div class="ch-sec-body"><div>${body}</div></div>` : ''}
+        </div>`;
+    },
+ 
+    categorize() {
+      const order = [];
+      const byCategory = {};
+      for (const mod of values(client.modules)) {
+        if (!byCategory[mod.category]) { byCategory[mod.category] = []; order.push(mod.category); }
+        byCategory[mod.category].push(mod);
+      }
+      return { order, byCategory };
+    },
+ 
+    categoryIcon(cat) {
+      return ({ Combat: 'fa-crosshairs', Movement: 'fa-person-running', Visuals: 'fa-eye', Utility: 'fa-toolbox' })[cat] ?? 'fa-cube';
+    },
+ 
+    build() {
+      const existing = document.getElementById('ch-root');
+      if (existing) return existing;
+ 
+      document.head.appendChild(UIUtil.createStylesheet());
+ 
+      const { order, byCategory } = this.categorize();
+ 
+      const tabsHtml = order.map((cat, i) => `
+        <button class="ch-tab${i === 0 ? ' active' : ''}" data-tab="${slug(cat)}">
+          <i class="fa-solid ${this.categoryIcon(cat)}"></i>${cat}
+        </button>`).join('');
+ 
+      const panelsHtml = order.map((cat, i) => `
+        <div class="ch-tab-panel${i === 0 ? ' active' : ''}" data-panel="${slug(cat)}">
+          ${byCategory[cat].map(mod => this.mkModuleSection(mod)).join('')}
+        </div>`).join('');
+ 
+      const root = document.createElement('div');
+      root.id = 'ch-root';
+      root.innerHTML = `
+        <div id="ch-hdr">
+          <span id="ch-title">CLICK HELPER <span>v1.5.3</span></span>
+          <div style="display:flex;gap:5px;">
+            <button class="ch-hbtn" id="ch-gen" title="New Account"><i class="fa-solid fa-user"></i></button>
+            <button class="ch-hbtn" id="ch-inject" title="Inject"><i class="fa-solid fa-syringe"></i></button>
+            <button class="ch-hbtn" id="ch-min" title="Minimize">—</button>
+          </div>
+        </div>
+        <div id="ch-tabs">${tabsHtml}</div>
+        <div id="ch-body">${panelsHtml}</div>
+        <div id="ch-status">
+          <span><span class="dot red" id="st-dot"></span><span id="st-txt">Waiting for game</span></span>
+          <span style="opacity:0.6">RSHIFT = MENU</span>
+        </div>
+      `;
+ 
+      UIUtil.safeAppend(root);
+      return root;
+    }
+  };
+ 
+  const InputHandler = {
+    listeningBind: null,
+ 
+    init(root) {
+      this._wireTabs(root);
+      this._wireSections(root);
+      this._wireToggles(root);
+      this._wireSliders(root);
+	  this._wireBooleans(root)
+      this._wireKeybindCapture(root);
+      this._wireGlobalKeydown(root);
+      this._wireButtons(root);
+      this._wireDrag(root);
+    },
+ 
+    _wireTabs(root) {
+      const tabs = root.querySelectorAll('.ch-tab');
+      const panels = root.querySelectorAll('.ch-tab-panel');
+      tabs.forEach(tab => tab.addEventListener('click', () => {
+        tabs.forEach(t => t.classList.remove('active'));
+        panels.forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        root.querySelector(`.ch-tab-panel[data-panel="${tab.dataset.tab}"]`)?.classList.add('active');
+      }));
+    },
+ 
+    _wireSections(root) {
+      root.querySelectorAll('[data-sec-toggle]').forEach(hdr => {
+        hdr.addEventListener('click', () => document.getElementById(`sec-${hdr.dataset.secToggle}`)?.classList.toggle('expanded'));
+      });
+    },
+ 
+    _wireToggles(root) {
+      root.querySelectorAll('.ch-sec-toprow .mod-row').forEach(row => {
+        const mod = client.modules[row.dataset.mod];
+        if (!mod) return;
+        const tg = document.getElementById(`tg-${mod.id()}`);
+        row.addEventListener('click', e => {
+          if (e.target.closest('.kb') || e.target.classList.contains('kb-x')) return;
+          tg.classList.toggle('on', mod.toggle());
+        });
+      });
+    },
+    _wireSliders(root) {
+      root.querySelectorAll('[data-slider]').forEach(row => {
+        const [modName, key] = row.dataset.slider.split('::');
+        const mod = client.modules[modName];
+        const base = `sl-${mod.id()}-${slug(key)}`;
+        const range = document.getElementById(base);
+        const num = document.getElementById(`${base}-v`);
+        if (!range || !num) return;
+ 
+        const apply = (rawValue, fromText) => {
+          if (fromText && (rawValue === '' || rawValue === '-' || rawValue.endsWith('.'))) return;
+          const v = parseFloat(rawValue);
+          if (Number.isNaN(v)) return;
+          range.value = v;
+          if (!fromText) num.value = v;
+          mod[key] = v;
+          if (key === "Max CPS" && mod["Min CPS"] > v) {
+            mod["Min CPS"] = v;
+            const minRange = document.getElementById(`sl-${mod.id()}-min-cps`);
+            const minNum = document.getElementById(`sl-${mod.id()}-min-cps-v`);
+            if (minRange) minRange.value = v;
+            if (minNum) minNum.value = v;
+          }
+          else if (key === "Min CPS" && mod["Max CPS"] < v) {
+            mod["Max CPS"] = v;
+            const maxRange = document.getElementById(`sl-${mod.id()}-max-cps`);
+            const maxNum = document.getElementById(`sl-${mod.id()}-max-cps-v`);
+            if (maxRange) maxRange.value = v;
+            if (maxNum) maxNum.value = v;
+          }
+ 
+          Storage.debounced();
+        };
+ 
+        range.addEventListener('input', e => apply(e.target.value, false));
+        num.addEventListener('input', e => apply(e.target.value, true));
+        num.addEventListener('blur', e => {
+          const v = parseFloat(e.target.value);
+          e.target.value = Number.isNaN(v) ? range.value : v;
+          if (!Number.isNaN(v)) apply(e.target.value, false);
+        });
+        num.addEventListener('keydown', e => e.stopPropagation(), true);
+      });
+    },
+	
+	_wireBooleans(root) {
+      root.querySelectorAll('[data-boolean]').forEach(row => {
+        const [modName, key] = row.dataset.boolean.split('::');
+        const mod = client.modules[modName];
+        const tg = document.getElementById(`bool-${mod.id()}-${slug(key)}`);
+        if (!tg) return;
+ 
+        row.addEventListener('click', () => {
+          const newVal = !mod[key];
+          mod[key] = newVal;
+          tg.classList.toggle('on', newVal);
+          Storage.debounced();
+        });
+      });
+    },
+ 
+    _wireKeybindCapture(root) {
+      root.addEventListener('click', e => {
+        const unbindEl = e.target.closest('[data-unbind]');
+        if (unbindEl) {
+          e.stopPropagation();
+          this._setBind(unbindEl.dataset.unbind, '');
+          return;
+        }
+        const kbEl = e.target.closest('.kb');
+        const action = kbEl?.dataset.action;
+        if (!action) return;
+ 
+        if (this.listeningBind) this._resetKbVisual(this.listeningBind);
+        this.listeningBind = action;
+        kbEl.classList.add('listening');
+        kbEl.querySelector('.kb-text').innerText = '…';
+      });
+    },
+ 
+    _resetKbVisual(action) {
+      const el = document.getElementById(`bind-${client.modules[action]?.id() ?? action}`);
+      if (!el) return;
+      el.classList.remove('listening');
+      el.querySelector('.kb-text').innerText = UIUtil.bindDisplay(client.binds[action]) || '—';
+    },
+ 
+    _setBind(action, code) {
+      client.binds[action] = code;
+      const el = document.getElementById(`bind-${client.modules[action]?.id() ?? action}`);
+      if (el) {
+        el.querySelector('.kb-text').innerText = code ? UIUtil.bindDisplay(code) : '—';
+        el.classList.remove('listening');
+        const x = el.querySelector('.kb-x');
+        if (x) x.style.display = code ? '' : 'none';
+      }
+      Storage.debounced();
+    },
+ 
+    _wireGlobalKeydown(root) {
+      let visible = true;
+      document.addEventListener('keydown', e => {
+        if (e.repeat) return;
+ 
+        if (this.listeningBind) {
+          e.preventDefault(); e.stopPropagation();
+          if (e.code === 'Escape') this._resetKbVisual(this.listeningBind);
+          else if (e.code === 'Backspace') this._setBind(this.listeningBind, '');
+          else this._setBind(this.listeningBind, e.code);
+          this.listeningBind = null;
+          return;
+        }
+ 
+        if (e.code === client.binds.menu) {
+          visible = !visible;
+          root.classList.toggle('hidden', !visible);
+          return;
+        }
+ 
+        if (document.activeElement?.tagName === 'INPUT') return;
+ 
+        for (const mod of values(client.modules)) {
+          if (client.binds[mod.name] === e.code) {
+            const tg = document.getElementById(`tg-${mod.id()}`);
+            if (tg) tg.classList.toggle('on', mod.toggle());
+          }
+        }
+      }, true);
+    },
+ 
+    _wireButtons(root) {
+      document.getElementById('ch-gen').addEventListener('click', () => {
+        if (confirm('Are you sure you want to clear cookies/local storage and generate a new account?')) AccountModule.clearAndReload();
+      });
+      document.getElementById('ch-inject').addEventListener('click', () => { if (!hooks.injected) hooks.init(); });
+ 
+      let mini = false;
+      document.getElementById('ch-min').addEventListener('click', () => root.classList.toggle('mini', mini = !mini));
+    },
+ 
+    _wireDrag(root) {
+      const hdr = document.getElementById('ch-hdr');
+      hdr.addEventListener('mousedown', e => {
+        if (e.target !== hdr && !e.target.closest('#ch-title')) return;
+        e.preventDefault();
+        const rect = root.getBoundingClientRect();
+        const offsetX = e.clientX - rect.left, offsetY = e.clientY - rect.top;
+ 
+        const move = ev => {
+          const maxX = window.innerWidth - rect.width, maxY = window.innerHeight - rect.height;
+          root.style.left = `${math.clamp(ev.clientX - offsetX, 0, maxX)}px`;
+          root.style.top = `${math.clamp(ev.clientY - offsetY, 0, maxY)}px`;
+          root.style.right = 'unset';
+        };
+        const up = () => {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+          hdr.style.cursor = 'grab';
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+        hdr.style.cursor = 'grabbing';
+      });
+    }
+  };
+ 
+  const ticker = {
+    inGame: false,
+    _lastTs: 0,
+ 
+    start() { requestAnimationFrame(ts => this.tick(ts)); },
+ 
+    tick(ts) {
+      requestAnimationFrame(ts => this.tick(ts));
+ 
+      const nowInGame = noa.connectedInGame();
+      if (nowInGame !== this.inGame) {
+        this.inGame = nowInGame;
+        const dot = document.getElementById('st-dot');
+        const txt = document.getElementById('st-txt');
+        if (dot && txt) {
+          if (this.inGame) { dot.className = 'dot green'; txt.innerText = 'Injected (Ingame)'; }
+          else if (hooks.noa) { dot.className = 'dot green'; txt.innerText = 'Injected (Lobby)'; }
+          else { dot.className = 'dot red'; txt.innerText = 'Waiting for game'; }
+        }
+      }
+      if (!this.inGame) return;
+ 
+      const dt = this._lastTs ? (ts - this._lastTs) / 1000 : 0;
+      this._lastTs = ts;
+      for (const mod of values(client.modules)) mod.render(ts, dt);
+    }
+  };
+ 
+  let uiBuilt = false;
+  function initUI() {
+    if (uiBuilt) return;
+    uiBuilt = true;
+    const root = UIBuilder.build();
+    InputHandler.init(root);
+  }
+ 
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initUI);
+  else initUI();
+ 
+  console.log(
+    "%c[Click Helper]%c This script is detected, never use on your main!",
+    "background: linear-gradient(90deg, #7c5cfc, #c84cff); color: #fff; font-weight: bold; padding: 3px 8px; border-radius: 4px;",
+    "color: #ff6688; font-weight: bold; margin-left: 6px;"
+  );
+ 
+  let initialized = false;
+  const poll = setInterval(() => {
+    if (!uiBuilt) initUI();
+    if (window.noa && !initialized) {
+      initialized = true;
+      hooks.noa = window.noa;
+      hooks.injected = true;
+      hooks.onInjected();
+      ticker.start();
+      clearInterval(poll);
+    }
+  }, 500);
+})();
